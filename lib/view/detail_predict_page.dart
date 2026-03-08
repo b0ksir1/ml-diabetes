@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:diabetes_app/constants/diabetes_predict_mapping.dart';
 import 'package:diabetes_app/models/predict_input_profile.dart';
 import 'package:diabetes_app/utils/app_storage.dart';
 import 'package:diabetes_app/utils/custom_common_util.dart';
@@ -11,7 +12,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
-// 텍스트박스로 직접 입력하는 상세 예측 (임신 0~14, 혈당 44~199)
 class DetailPredictPage extends StatefulWidget {
   const DetailPredictPage({super.key});
 
@@ -25,13 +25,11 @@ class _DetailPredictPageState extends State<DetailPredictPage> {
   int _heightCm = 170;
   int _weightKg = 70;
 
-  static const int _pregMin = 0;
-  static const int _pregMax = 14;
-  static const int _sugarMin = 44;
-  static const int _sugarMax = 199;
+  bool _hasHypertension = false;
+  bool _hasHeartDisease = false;
+  String _smokingStatus = StrokePredictMapping.smokingOptions.first;
 
-  final _pregCtrl = TextEditingController();
-  final _sugarCtrl = TextEditingController();
+  final _glucoseCtrl = TextEditingController();
   VoidCallback? _unlistenProfile;
 
   @override
@@ -50,8 +48,7 @@ class _DetailPredictPageState extends State<DetailPredictPage> {
   @override
   void dispose() {
     _unlistenProfile?.call();
-    _pregCtrl.dispose();
-    _sugarCtrl.dispose();
+    _glucoseCtrl.dispose();
     super.dispose();
   }
 
@@ -70,40 +67,48 @@ class _DetailPredictPageState extends State<DetailPredictPage> {
     ).save();
   }
 
-  bool _isPregOut() {
-    final text = _pregCtrl.text.trim();
-    if (text.isEmpty) return false; // 공백=0
-    final v = int.tryParse(text);
-    return v == null || v < _pregMin || v > _pregMax;
+  bool _isGlucoseOut() {
+    final text = _glucoseCtrl.text.trim();
+    if (text.isEmpty) return false;
+    final v = double.tryParse(text);
+    if (v == null) return true;
+    return StrokePredictMapping.isGlucoseOutOfRange(v);
   }
 
-  bool _isSugarOut() {
-    final text = _sugarCtrl.text.trim();
-    if (text.isEmpty) return false; // 혈당 선택사항
-    final v = int.tryParse(text);
-    return v == null || v < _sugarMin || v > _sugarMax;
-  }
+  bool get _ok => _bmi > 0 && !_isGlucoseOut();
 
-  // 공백이면 0 (API 전송용)
-  // ignore: unused_element
-  int get _pregVal {
-    final text = _pregCtrl.text.trim();
-    if (text.isEmpty) return 0;
-    return int.tryParse(text) ?? 0;
+  Color _riskColor(String label) {
+    if (label.contains('고위험')) return Colors.red.shade600;
+    if (label.contains('중위험')) return Colors.orange.shade700;
+    return Colors.green.shade600;
   }
-
-  bool get _ok => _bmi > 0 && !_isPregOut() && !_isSugarOut();
 
   Future<void> _onPredict() async {
-    CustomCommonUtil.showLoadingOverlay(context, message: '당뇨 위험도를 분석 중입니다...');
+    CustomCommonUtil.showLoadingOverlay(
+      context,
+      message: '뇌졸중 위험도를 분석 중입니다...',
+    );
 
     try {
       final url = '${CustomCommonUtil.getApiBaseUrlSync()}/predict';
 
-      final body = {'입력모드': 'detail', '나이': _age, 'BMI': _bmi, '임신횟수': _pregVal};
+      final body = {
+        'input_mode': 'detail',
+        'age': StrokePredictMapping.scaleAge(_age),
+        'bmi': StrokePredictMapping.scaleBmi(_bmi),
+        'hypertension': StrokePredictMapping.scaleHypertension(
+          _hasHypertension,
+        ),
+        'heart_disease': StrokePredictMapping.scaleHeartDisease(
+          _hasHeartDisease,
+        ),
+        'smoking_status': StrokePredictMapping.scaleSmoking(_smokingStatus),
+      };
 
-      if (_sugarCtrl.text.trim().isNotEmpty) {
-        body['혈당'] = int.parse(_sugarCtrl.text.trim());
+      if (_glucoseCtrl.text.trim().isNotEmpty) {
+        body['avg_glucose_level'] = StrokePredictMapping.scaleGlucose(
+          double.parse(_glucoseCtrl.text.trim()),
+        );
       }
 
       final response = await http.post(
@@ -178,14 +183,12 @@ class _DetailPredictPageState extends State<DetailPredictPage> {
                           style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
-                            color: data['prediction'] == 1
-                                ? Colors.red.shade600
-                                : Colors.green.shade600,
+                            color: _riskColor(label),
                           ),
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          '당뇨 가능성: ${probability.toStringAsFixed(1)}%',
+                          '뇌졸중 위험 확률: ${probability.toStringAsFixed(1)}%',
                           textAlign: TextAlign.center,
                           style: const TextStyle(fontSize: 16),
                         ),
@@ -198,7 +201,7 @@ class _DetailPredictPageState extends State<DetailPredictPage> {
                         ],
                         const SizedBox(height: 24),
                         const Text(
-                          '이 결과는 통계적 수치에 의한 예측일 뿐이므로\n정확한 결과는 가까운 병원을 방문하시어\n검진하시길 바랍니다.',
+                          '이 결과는 의료 진단이 아닌 참고용 위험도 정보입니다. 이상 징후가 있으면 의료진 상담을 권장합니다.',
                           textAlign: TextAlign.center,
                           style: TextStyle(fontSize: 13, color: Colors.grey),
                         ),
@@ -248,7 +251,7 @@ class _DetailPredictPageState extends State<DetailPredictPage> {
                                 );
                               }
                             },
-                            child: const Text('병원 찾기'),
+                            child: const Text('주변 병원 찾기'),
                           ),
                         ),
                       ],
@@ -273,115 +276,115 @@ class _DetailPredictPageState extends State<DetailPredictPage> {
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: const EdgeInsets.all(20),
           child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          spacing: 24,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: 12,
-              children: [
-                const Text('나이'),
-                AgePicker(
-                  initialAge: _age,
-                  onChanged: (age) {
-                    setState(() => _age = age);
-                    _saveProfile();
-                  },
-                ),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: 12,
-              children: [
-                const Text('키·몸무게 (BMI 산출)'),
-                HeightWeightPicker(
-                  initialHeight: _heightCm,
-                  initialWeight: _weightKg,
-                  onChanged: (height, weight, bmi) {
-                    setState(() {
-                      _heightCm = height;
-                      _weightKg = weight;
-                      _bmi = bmi;
-                    });
-                    _saveProfile();
-                  },
-                ),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: 12,
-              children: [
-                const Text('임신횟수 (회)'),
-                TextFormField(
-                  controller: _pregCtrl,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: InputDecoration(
-                    hintText: '최소 $_pregMin, 최대 $_pregMax (미입력 시 0)',
-                    hintStyle: Theme.of(context).textTheme.bodySmall,
-                    errorText: _pregCtrl.text.trim().isNotEmpty && _isPregOut()
-                        ? '범위를 벗어났습니다 ($_pregMin~$_pregMax)'
-                        : null,
-                    errorBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.red.shade400),
-                    ),
-                    focusedErrorBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.red.shade400),
-                    ),
-                    filled: true,
-                    fillColor: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHighest,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            spacing: 24,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 12,
+                children: [
+                  const Text('나이'),
+                  AgePicker(
+                    initialAge: _age,
+                    onChanged: (age) {
+                      setState(() => _age = age);
+                      _saveProfile();
+                    },
                   ),
-                  onChanged: (_) => setState(() {}),
-                ),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              spacing: 8,
-              children: [
-                const Text('혈당 (mg/dL)'),
-                TextFormField(
-                  controller: _sugarCtrl,
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: InputDecoration(
-                    hintText: '최소 $_sugarMin, 최대 $_sugarMax (선택)',
-                    hintStyle: Theme.of(context).textTheme.bodySmall,
-                    errorText:
-                        _sugarCtrl.text.trim().isNotEmpty && _isSugarOut()
-                        ? '범위를 벗어났습니다 ($_sugarMin~$_sugarMax)'
-                        : null,
-                    errorBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.red.shade400),
-                    ),
-                    focusedErrorBorder: OutlineInputBorder(
-                      borderSide: BorderSide(color: Colors.red.shade400),
-                    ),
-                    filled: true,
-                    fillColor: Theme.of(
-                      context,
-                    ).colorScheme.surfaceContainerHighest,
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 12,
+                children: [
+                  const Text('키/몸무게 (BMI 자동 계산)'),
+                  HeightWeightPicker(
+                    initialHeight: _heightCm,
+                    initialWeight: _weightKg,
+                    onChanged: (height, weight, bmi) {
+                      setState(() {
+                        _heightCm = height;
+                        _weightKg = weight;
+                        _bmi = bmi;
+                      });
+                      _saveProfile();
+                    },
                   ),
-                  onChanged: (_) => setState(() {}),
-                ),
-                Text(
-                  '혈당 미선택 시에도 예측 가능하나, 정확도가 낮아질 수 있습니다.',
-                  style:
-                      (Theme.of(context).textTheme.bodySmall ??
-                              const TextStyle())
-                          .copyWith(color: Colors.red.shade400),
-                ),
-              ],
-            ),
-            FilledButton(
-              onPressed: _ok ? _onPredict : null,
-              child: const Text('예측하기'),
-            ),
-          ],
+                ],
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('고혈압 진단 경험'),
+                value: _hasHypertension,
+                onChanged: (v) => setState(() => _hasHypertension = v),
+              ),
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('심장질환 진단 경험'),
+                value: _hasHeartDisease,
+                onChanged: (v) => setState(() => _hasHeartDisease = v),
+              ),
+              DropdownButtonFormField<String>(
+                value: _smokingStatus,
+                decoration: const InputDecoration(labelText: '흡연 상태'),
+                items: StrokePredictMapping.smokingOptions
+                    .map(
+                      (e) => DropdownMenuItem<String>(value: e, child: Text(e)),
+                    )
+                    .toList(),
+                onChanged: (v) {
+                  if (v == null) return;
+                  setState(() => _smokingStatus = v);
+                },
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                spacing: 8,
+                children: [
+                  const Text('평균 혈당 (mg/dL, 선택)'),
+                  TextFormField(
+                    controller: _glucoseCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                    ],
+                    decoration: InputDecoration(
+                      hintText:
+                          '최소 ${StrokePredictMapping.glucoseMin}, 최대 ${StrokePredictMapping.glucoseMax}',
+                      hintStyle: Theme.of(context).textTheme.bodySmall,
+                      errorText:
+                          _glucoseCtrl.text.trim().isNotEmpty && _isGlucoseOut()
+                          ? '범위를 벗어났습니다 (${StrokePredictMapping.glucoseMin}~${StrokePredictMapping.glucoseMax})'
+                          : null,
+                      errorBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.red.shade400),
+                      ),
+                      focusedErrorBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.red.shade400),
+                      ),
+                      filled: true,
+                      fillColor: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                    ),
+                    onChanged: (_) => setState(() {}),
+                  ),
+                  Text(
+                    '평균 혈당을 모르면 비워둔 채로 예측할 수 있습니다.',
+                    style:
+                        (Theme.of(context).textTheme.bodySmall ??
+                                const TextStyle())
+                            .copyWith(color: Colors.red.shade400),
+                  ),
+                ],
+              ),
+              FilledButton(
+                onPressed: _ok ? _onPredict : null,
+                child: const Text('예측하기'),
+              ),
+            ],
           ),
         ),
       ),

@@ -1,0 +1,91 @@
+{
+  "version": 1,
+  "target": "stroke",
+  "models": {
+    "with_glucose": {
+      "path": "stroke_model_with_glucose.joblib",
+      "features": [
+        "age",
+        "hypertension",
+        "heart_disease",
+        "avg_glucose_level",
+        "bmi",
+        "smoking_status"
+      ],
+      "algorithm": "LogisticRegression",
+      "valid_metrics": {
+        "accuracy": 0.8649706457925636,
+        "precision": 0.19863013698630136,
+        "recall": 0.58,
+        "f1": 0.29591836734693877,
+        "roc_auc": 0.854753086419753
+      },
+      "test_metrics": {
+        "accuracy": 0.8796477495107632,
+        "precision": 0.22556390977443608,
+        "recall": 0.6,
+        "f1": 0.32786885245901637,
+        "roc_auc": 0.8377366255144032
+      }
+    },
+    "without_glucose": {
+      "path": "stroke_model_without_glucose.joblib",
+      "features": [
+        "age",
+        "hypertension",
+        "heart_disease",
+        "bmi",
+        "smoking_status"
+      ],
+      "algorithm": "LogisticRegression",
+      "valid_metrics": {
+        "accuracy": 0.9031311154598826,
+        "precision": 0.2247191011235955,
+        "recall": 0.4,
+        "f1": 0.28776978417266186,
+        "roc_auc": 0.8500823045267489
+      },
+      "test_metrics": {
+        "accuracy": 0.9129158512720157,
+        "precision": 0.25316455696202533,
+        "recall": 0.4,
+        "f1": 0.31007751937984496,
+        "roc_auc": 0.835812757201646
+      }
+    }
+  },
+  "thresholds": {
+    "with_glucose": 0.78,
+    "without_glucose": 0.845
+  },
+  "band_thresholds": {
+    "low": 0.33,
+    "high": 0.66
+  },
+  "feature_ranges": {
+    "age": [
+      -2.0856443111234593,
+      1.892114850486164
+    ],
+    "hypertension": [
+      -0.49131228374612795,
+      3.3144530572075084
+    ],
+    "heart_disease": [
+      -0.46208566284388364,
+      4.241074525165637
+    ],
+    "avg_glucose_level": [
+      -1.5676123553696084,
+      2.2382517281809524
+    ],
+    "bmi": [
+      -2.8168616815231178,
+      2.684262533408979
+    ],
+    "smoking_status": [
+      -1.1725614200923482,
+      1.9177577730609463
+    ]
+  }
+}

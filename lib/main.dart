@@ -22,8 +22,9 @@ class _MyAppState extends State<MyApp> {
 
   void _toggleTheme() {
     setState(() {
-      _themeMode =
-          _themeMode == ThemeMode.light ? ThemeMode.dark : ThemeMode.light;
+      _themeMode = _themeMode == ThemeMode.light
+          ? ThemeMode.dark
+          : ThemeMode.light;
     });
   }
 
@@ -34,7 +35,7 @@ class _MyAppState extends State<MyApp> {
       onToggleTheme: _toggleTheme,
       child: MaterialApp(
         debugShowCheckedModeBanner: false,
-        title: '당뇨 예측 앱',
+        title: '뇌졸중 예측 앱',
         theme: ThemeData(
           brightness: Brightness.light,
           colorScheme: ColorScheme.fromSeed(seedColor: Colors.blue),

@@ -1,22 +1,23 @@
-# 요청/응답 스키마 (한글 alias 지원)
 from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
 
 class PredictRequest(BaseModel):
-    """예측 입력 (한글 키 가능)"""
-    pregnancies: float | None = Field(None, alias="임신횟수")
-    glucose: float | None = Field(None, alias="혈당")
-    bmi: float | None = Field(None, alias="BMI")
+    """Stroke risk request payload."""
+
     age: float | None = Field(None, alias="나이")
-    input_mode: str | None = Field(None, alias="입력모드")
+    bmi: float | None = Field(None, alias="BMI")
+    avg_glucose_level: float | None = Field(None, alias="평균혈당")
+    hypertension: float | None = Field(None, alias="고혈압")
+    heart_disease: float | None = Field(None, alias="심장질환")
+    smoking_status: float | None = Field(None, alias="흡연상태")
+    input_mode: str | None = Field("detail", alias="입력모드")
 
     model_config = ConfigDict(populate_by_name=True)
 
 
 class PredictResponse(BaseModel):
-    """예측 결과"""
     prediction: int
     probability: float
     label: str
@@ -26,11 +27,9 @@ class PredictResponse(BaseModel):
 
 
 class GeocodeRequest(BaseModel):
-    """주소 입력"""
     address: str = Field(..., description="변환할 주소")
 
 
 class GeocodeResponse(BaseModel):
-    """lat/lng 반환"""
     lat: str
     lng: str

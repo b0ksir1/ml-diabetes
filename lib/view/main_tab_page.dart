@@ -4,7 +4,6 @@ import 'package:diabetes_app/view/simple_predict_page.dart';
 import 'package:diabetes_app/widgets/app_settings_drawer.dart';
 import 'package:flutter/material.dart';
 
-// 심플/상세 탭 전환 + 초기화 버튼
 class MainTabPage extends StatefulWidget {
   const MainTabPage({super.key});
 
@@ -28,17 +27,14 @@ class _MainTabPageState extends State<MainTabPage> {
     ),
   ];
 
-  static const List<String> _titles = [
-    '심플 당뇨 예측',
-    '상세 당뇨 예측',
-  ];
+  static const List<String> _titles = ['심플 뇌졸중 예측', '상세 뇌졸중 예측'];
 
   Future<void> _onRefresh() async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('초기화'),
-        content: const Text('정말 초기화 하시겠습니까?'),
+        content: const Text('현재 입력값을 초기화하시겠습니까?'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -52,7 +48,6 @@ class _MainTabPageState extends State<MainTabPage> {
       ),
     );
     if (ok == true && mounted) {
-      // 입력 프로필 저장값 제거 -> 기본값(나이30/키170/몸무게70)으로 복귀
       await PredictInputProfile.clear();
       if (!mounted) return;
       setState(() {
@@ -82,21 +77,18 @@ class _MainTabPageState extends State<MainTabPage> {
           ],
         ),
         drawer: const AppSettingsDrawer(),
-        body: IndexedStack(
-          index: _index,
-          children: _pages,
-        ),
+        body: IndexedStack(index: _index, children: _pages),
         bottomNavigationBar: BottomNavigationBar(
           currentIndex: _index,
           onTap: (index) => setState(() => _index = index),
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.analytics_outlined),
-              label: '심플 당뇨 예측',
+              label: '심플 뇌졸중 예측',
             ),
             BottomNavigationBarItem(
               icon: Icon(Icons.assessment),
-              label: '상세 당뇨 예측',
+              label: '상세 뇌졸중 예측',
             ),
           ],
         ),

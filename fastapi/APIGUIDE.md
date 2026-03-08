@@ -1,139 +1,132 @@
-# 당뇨 예측 FastAPI 가이드 (API GUIDE)
+﻿# Stroke FastAPI API Guide
 
-이 문서는 Flutter 앱(프론트엔드)과 통신하기 위해 구성된 FastAPI 백엔드 서버의 엔드포인트 및 스키마 명세서입니다.
+Flutter 앱과 통신하는 FastAPI 백엔드 명세입니다.
 
----
-
-## 🚀 서버 실행 방법
-
-### 개발 모드 실행
-```bash
+## 실행
+```powershell
 cd fastapi
-source .venv/bin/activate
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
-> **참고**: 실기기(Flutter)에서 테스트할 경우, `--host 0.0.0.0`으로 실행해야 동일 네트워크 내에서 IP를 통해 접근할 수 있습니다.
 
-### Swagger UI (API 문서 테스트)
-서버 실행 후 브라우저에서 아래 주소로 접속하면, 내장된 Swagger UI를 통해 직접 API를 테스트해 볼 수 있습니다.
-- **URL**: `http://localhost:8000/docs`
+문서 확인:
+- Swagger: `http://localhost:8000/docs`
 
----
+## Endpoints
 
-## 📡 API 엔드포인트 명세
+### 1) GET /health
+서버 상태와 모델 로드 상태를 확인합니다.
 
-### 1. 상태 및 정보 확인 (Health Check)
-서버 상태와 실기기 연결용 로컬 IP 정보를 반환합니다.
-
-- **URL**: `/health`
-- **Method**: `GET`
-- **응답 예시 (200 OK)**:
+응답 예시:
 ```json
 {
   "status": "ok",
-  "model_sugar": "RandomForest (혈당 포함: 혈당, BMI, 나이, 임신횟수)",
-  "model_no_sugar": "RandomForest (혈당 미포함: BMI, 나이, 임신횟수)",
+  "model_with_glucose": "Stroke Model A (age, hypertension, heart_disease, avg_glucose_level, bmi, smoking_status)",
+  "model_without_glucose": "Stroke Model B (age, hypertension, heart_disease, bmi, smoking_status)",
   "local_ip": "192.168.0.15",
   "suggested_url": "http://192.168.0.15:8000"
 }
 ```
 
----
+### 2) POST /predict
+뇌졸중 위험 확률을 계산합니다.
 
-### 2. 당뇨 예측 요청 (Predict)
-입력받은 사용자 데이터를 바탕으로 당뇨 위험도 확률 및 차트 이미지를 반환합니다.
-- 한글 키(`나이`, `BMI`, `임신횟수`, `혈당`)를 사용합니다.
-- `입력모드`로 상세/심플 시나리오를 구분합니다.
+요청 스키마 (`PredictRequest`):
+- `age: float` (스케일된 값)
+- `bmi: float` (스케일된 값)
+- `avg_glucose_level: float | null` (스케일된 값, 선택)
+- `hypertension: float` (인코딩/스케일된 값)
+- `heart_disease: float` (인코딩/스케일된 값)
+- `smoking_status: float` (인코딩/스케일된 값)
+- `input_mode: string | null` (`detail` 또는 `simple`, 현재 로직상 참고 필드)
 
-- **URL**: `/predict`
-- **Method**: `POST`
-- **요청 본문 (JSON)**: 최소 1개 이상의 데이터가 포함되어야 합니다.
+요청 예시(혈당 포함):
 ```json
 {
-  "입력모드": "detail",
-  "나이": 45,
-  "BMI": 28.5,
-  "임신횟수": 2.0,
-  "혈당": 140.0
+  "input_mode": "detail",
+  "age": 1.62,
+  "bmi": -0.93,
+  "avg_glucose_level": -0.19,
+  "hypertension": -0.3183,
+  "heart_disease": -0.2483,
+  "smoking_status": 0.8408
 }
 ```
 
-- **입력모드 규칙**
-  - `detail`: 상세(수치형) 예측
-  - `simple`: 간편(등급형) 예측
+요청 예시(혈당 미포함):
+```json
+{
+  "input_mode": "simple",
+  "age": 0.15,
+  "bmi": -0.10,
+  "hypertension": -0.3183,
+  "heart_disease": -0.2483,
+  "smoking_status": -0.0956
+}
+```
 
-- **시나리오 분기**
-  - `detail` + 혈당 포함 -> Scenario A
-  - `detail` + 혈당 미포함 -> Scenario B
-  - `simple` + 혈당 포함 -> Scenario C
-  - `simple` + 혈당 미포함 -> Scenario C-NS
-
-- **응답 본문 (200 OK)**:
+응답 예시:
 ```json
 {
   "prediction": 1,
-  "probability": 0.546,
-  "label": "당뇨 위험",
+  "probability": 0.8636,
+  "label": "고위험군",
   "input": {
-    "age": 50.0,
-    "bmi": 33.6,
-    "pregnancies": 6.0,
-    "glucose": 148.0
+    "age": 1.623,
+    "hypertension": -0.3183,
+    "heart_disease": -0.2483,
+    "avg_glucose_level": -0.188,
+    "bmi": -0.928,
+    "smoking_status": 0.8408
   },
-  "used_model": "Scenario A (상세/수치형, 혈당 포함)",
-  "chart_image_base64": "iVBORw0KGgoAAAANSUhEUgAA..." 
+  "used_model": "Stroke Model A (혈당 포함)",
+  "chart_image_base64": "iVBORw0KGgoAAA..."
 }
 ```
-> `chart_image_base64`: Flutter 측에서 `Image.memory(base64Decode(chart_image_base64))` 형태로 즉시 렌더링 가능한 모델 차트 이미지(PNG) 데이터입니다.
 
-- **에러 응답**:
-  - `400 Bad Request`: 입력값 누락/입력모드 오류/허용 범위 초과
+분기 규칙:
+- `avg_glucose_level` 포함 -> `Stroke Model A (혈당 포함)`
+- `avg_glucose_level` 미포함 -> `Stroke Model B (혈당 미포함)`
 
----
+위험군 라벨 규칙:
+- `저위험군`, `중위험군`, `고위험군`
+- 기준값은 `fastapi/app/stroke_model_meta.json`의 `band_thresholds`
 
-### 3. 주소 좌표 변환 (Geocoding)
-한글 주소 텍스트를 받아 위도(latitude)와 경도(longitude)로 변환해 줍니다. 
-- 내부적으로 `geopy`의 Nominatim 오픈 API를 사용하며, 별도의 가입이나 키 발급이 불필요합니다.
+오류:
+- `400`: 필수 입력 누락, 범위 오류
 
-- **URL**: `/geocode`
-- **Method**: `POST`
-- **요청 본문 (JSON)**:
+### 3) POST /geocode
+주소를 위도/경도로 변환합니다.
+
+요청:
 ```json
-{
-  "address": "서울특별시 송파구 중대로 191"
-}
+{ "address": "서울시 강남구 테헤란로 212" }
 ```
 
-- **응답 본문 (200 OK)**:
+응답:
 ```json
-{
-  "lat": "37.4990789571513",
-  "lng": "127.125683181707"
-}
+{ "lat": "37.501", "lng": "127.039" }
 ```
 
-- **에러 응답**:
-  - `404 Not Found`: 해당 주소를 찾지 못한 경우
-  - `503 Service Unavailable`: 지오코딩 서비스 응답 지연
+오류:
+- `404`: 주소 변환 실패
 
----
+## 모델 아티팩트
+`fastapi/app`:
+- `stroke_model_with_glucose.joblib`
+- `stroke_model_without_glucose.joblib`
+- `stroke_model_meta.json`
 
-## 📁 프로젝트 내부 구조
-
-```text
-fastapi/
-├── APIGUIDE.md            # API 명세 및 가이드 (현재 문서)
-├── requirements.txt       # 파이썬 패키지 의존성
-└── app/
-    ├── main.py            # FastAPI 앱 초기화 및 엔드포인트 매핑
-    ├── schemas.py         # Pydantic을 활용한 입출력 데이터 타입 정의
-    ├── predictor.py       # 머신러닝 예측 로직 + Matplotlib 차트 생성 기능
-    ├── geocoding.py       # Nominatim 주소 검색 로직
-    ├── model_loader.py    # A/B/C/C-NS 모델 + 전처리 아티팩트 로더
-    ├── model_sugar.joblib # 런타임 호환 모델 (Scenario A)
-    ├── model_no_sugar.joblib # 런타임 호환 모델 (Scenario B)
-    ├── a_detail_sugar_model.joblib
-    ├── b_detail_no_sugar_model.joblib
-    ├── c_simple_sugar_model.joblib
-    └── cns_simple_no_sugar_model.joblib
+## 재학습
+```powershell
+cd fastapi
+python scripts\train_stroke_models.py `
+  --train "<train_csv_path>" `
+  --valid "<valid_csv_path>" `
+  --test "<test_csv_path>"
 ```
+
+학습 결과:
+- 모델 2개와 메타 파일이 `fastapi/app`에 저장됩니다.

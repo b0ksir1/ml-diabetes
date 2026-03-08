@@ -1,5 +1,4 @@
-# 혈당 유무에 따라 모델을 분기하여 예측 + 차트 생성
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import base64
 import io
@@ -7,64 +6,45 @@ import io
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
 from fastapi import HTTPException
-from sklearn.impute import KNNImputer
-from sklearn.preprocessing import StandardScaler
 
 from app.model_loader import (
-    CLIP_BOUNDS_DETAIL_NO_SUGAR,
-    CLIP_BOUNDS_DETAIL_SUGAR,
     FEATURE_LABELS,
     FEATURE_RANGES,
-    FEATURES_DETAIL_NO_SUGAR,
-    FEATURES_DETAIL_SUGAR,
-    FEATURES_SIMPLE_NO_SUGAR,
-    FEATURES_SIMPLE_SUGAR,
-    IMPUTER_DETAIL_NO_SUGAR,
-    IMPUTER_DETAIL_SUGAR,
-    MODEL_DETAIL_NO_SUGAR,
-    MODEL_DETAIL_SUGAR,
-    MODEL_NO_SUGAR,
-    MODEL_SIMPLE_NO_SUGAR,
-    MODEL_SIMPLE_SUGAR,
-    MODEL_SUGAR,
-    QUANTILES_SIMPLE_NO_SUGAR,
-    QUANTILES_SIMPLE_SUGAR,
-    SCALER_DETAIL_NO_SUGAR,
-    SCALER_DETAIL_SUGAR,
-    get_scenario_threshold,
-    standardize,
-    to_simple_grade,
+    FEATURES_NO_GLUCOSE,
+    FEATURES_WITH_GLUCOSE,
+    MODEL_NO_GLUCOSE,
+    MODEL_WITH_GLUCOSE,
+    get_band_thresholds,
+    get_model_threshold,
 )
 from app.schemas import PredictRequest, PredictResponse
 
 matplotlib.use("Agg")
-plt.rcParams["font.family"] = "AppleGothic"
+# 한글 폰트 우선순위: Windows -> macOS -> fallback
+plt.rcParams["font.family"] = ["Malgun Gothic", "AppleGothic", "DejaVu Sans"]
 plt.rcParams["axes.unicode_minus"] = False
 
 
-def create_chart_base64(
+def _create_chart_base64(
     probability: float,
     input_values: dict[str, float],
     model,
     feature_names: list[str],
 ) -> str:
-    """당뇨/정상 확률 + 피처 중요도(또는 입력값) 차트"""
     fig, axes = plt.subplots(2, 1, figsize=(6, 7))
 
-    # 상단: 당뇨/정상 확률 바 차트
     ax1 = axes[0]
-    diabetes_prob = max(0.0, min(1.0, probability))
-    normal_prob = 1.0 - diabetes_prob
-    labels = ["정상 가능성", "당뇨 가능성"]
-    values = [normal_prob, diabetes_prob]
+    stroke_prob = max(0.0, min(1.0, probability))
+    non_stroke_prob = 1.0 - stroke_prob
+    labels = ["비발생 가능성", "뇌졸중 위험 가능성"]
+    values = [non_stroke_prob, stroke_prob]
     colors = ["#4CAF50", "#E53935"]
 
     bars = ax1.bar(labels, values, color=colors)
     ax1.set_ylim(0, 1)
     ax1.set_ylabel("확률")
-    ax1.set_title("당뇨 예측 결과 (ML 모델)")
+    ax1.set_title("뇌졸중 예측 결과")
 
     for bar, value in zip(bars, values):
         ax1.text(
@@ -76,7 +56,6 @@ def create_chart_base64(
             fontsize=11,
         )
 
-    # 하단: 피처 중요도 또는 입력값
     ax2 = axes[1]
     chart_labels = [FEATURE_LABELS.get(k, k) for k in feature_names]
 
@@ -87,9 +66,9 @@ def create_chart_base64(
             for imp in importances
         ]
         bars2 = ax2.barh(chart_labels, importances, color=imp_colors)
-        ax2.set_xlim(0, max(importances) * 1.3)
+        ax2.set_xlim(0, max(importances) * 1.3 if len(importances) else 1)
         ax2.set_xlabel("중요도")
-        ax2.set_title("피처 중요도 (Feature Importance)")
+        ax2.set_title("피처 중요도")
         ax2.invert_yaxis()
         for bar, imp in zip(bars2, importances):
             ax2.text(
@@ -104,19 +83,18 @@ def create_chart_base64(
         input_vals = [input_values.get(k, 0.0) for k in feature_names]
         bar_colors = ["#1976D2" if v > 0 else "#9E9E9E" for v in input_vals]
         bars2 = ax2.barh(chart_labels, input_vals, color=bar_colors)
-        ax2.set_xlabel("입력값")
-        ax2.set_title("입력 항목별 수치")
+        ax2.set_xlabel("입력값(스케일)")
+        ax2.set_title("입력 피처")
         ax2.invert_yaxis()
         for bar, val in zip(bars2, input_vals):
-            if val > 0:
-                ax2.text(
-                    val + 0.5,
-                    bar.get_y() + bar.get_height() / 2,
-                    f"{val:.1f}",
-                    ha="left",
-                    va="center",
-                    fontsize=9,
-                )
+            ax2.text(
+                val + (0.05 if val >= 0 else -0.05),
+                bar.get_y() + bar.get_height() / 2,
+                f"{val:.2f}",
+                ha="left" if val >= 0 else "right",
+                va="center",
+                fontsize=9,
+            )
 
     fig.tight_layout()
 
@@ -127,23 +105,7 @@ def create_chart_base64(
     return base64.b64encode(buf.read()).decode("utf-8")
 
 
-def predict_with_model(payload: PredictRequest) -> PredictResponse:
-    """입력모드(detail/simple) + 혈당 유무에 따라 모델 분기 예측"""
-
-    # 입력값 수집 (영문 키 기준)
-    raw_input: dict[str, float | None] = {
-        "pregnancies": payload.pregnancies,
-        "glucose": payload.glucose,
-        "bmi": payload.bmi,
-        "age": payload.age,
-    }
-
-    user_provided = {k: float(v) for k, v in raw_input.items() if v is not None}
-
-    if not user_provided:
-        raise HTTPException(status_code=400, detail="최소 1개 이상의 입력 항목이 필요합니다.")
-
-    # 범위 검증
+def _validate_ranges(user_provided: dict[str, float]) -> None:
     for key, value in user_provided.items():
         if key in FEATURE_RANGES:
             min_v, max_v = FEATURE_RANGES[key]
@@ -151,109 +113,66 @@ def predict_with_model(payload: PredictRequest) -> PredictResponse:
                 label = FEATURE_LABELS.get(key, key)
                 raise HTTPException(
                     status_code=400,
-                    detail=f"{label}({key}) 값은 {min_v} ~ {max_v} 범위여야 합니다.",
+                    detail=f"{label}({key}) 값은 {min_v:.2f} ~ {max_v:.2f} 범위여야 합니다.",
                 )
 
-    # 혈당 포함 여부 + 입력 모드에 따라 모델 분기
-    has_glucose = "glucose" in user_provided
-    mode = (payload.input_mode or "detail").lower().strip()
-    if mode not in ("detail", "simple"):
-        raise HTTPException(status_code=400, detail="입력모드는 detail 또는 simple 이어야 합니다.")
 
-    # 피처에 해당하는 값이 최소 1개는 있어야 함
-    if mode == "simple":
-        if has_glucose:
-            feature_names = FEATURES_SIMPLE_SUGAR
-            model = MODEL_SIMPLE_SUGAR or MODEL_SUGAR
-            quantiles = QUANTILES_SIMPLE_SUGAR
-            used_model_name = "Scenario C (간편/등급형, 혈당 포함)"
-            threshold = get_scenario_threshold("C")
-        else:
-            feature_names = FEATURES_SIMPLE_NO_SUGAR
-            model = MODEL_SIMPLE_NO_SUGAR or MODEL_NO_SUGAR
-            quantiles = QUANTILES_SIMPLE_NO_SUGAR
-            used_model_name = "Scenario C-NS (간편/등급형, 혈당 미포함)"
-            threshold = get_scenario_threshold("C_NS")
+def _risk_label(probability: float) -> str:
+    low, high = get_band_thresholds()
+    if probability < low:
+        return "저위험군"
+    if probability < high:
+        return "중위험군"
+    return "고위험군"
 
-        active_count = sum(1 for k in feature_names if k in user_provided)
-        if active_count == 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"현재 모델에서 사용하는 항목이 입력되지 않았습니다. 필요 항목: {', '.join(feature_names)}",
-            )
 
-        # quantiles가 있으면 노트북 방식(등급화) 적용, 없으면 fallback
-        if quantiles:
-            row = {
-                FEATURE_LABELS[f]: float(
-                    to_simple_grade(f, user_provided.get(f, 0.0), quantiles)
-                )
-                for f in feature_names
-            }
-            X = pd.DataFrame([row])
-        else:
-            x_values = [standardize(f, user_provided.get(f, 0.0)) for f in feature_names]
-            X = np.array([x_values], dtype=float)
-    else:
-        if has_glucose:
-            feature_names = FEATURES_DETAIL_SUGAR
-            model = MODEL_DETAIL_SUGAR or MODEL_SUGAR
-            scaler = SCALER_DETAIL_SUGAR
-            imputer = IMPUTER_DETAIL_SUGAR
-            used_model_name = "Scenario A (상세/수치형, 혈당 포함)"
-            clip_bounds = CLIP_BOUNDS_DETAIL_SUGAR
-            threshold = get_scenario_threshold("A")
-        else:
-            feature_names = FEATURES_DETAIL_NO_SUGAR
-            model = MODEL_DETAIL_NO_SUGAR or MODEL_NO_SUGAR
-            scaler = SCALER_DETAIL_NO_SUGAR
-            imputer = IMPUTER_DETAIL_NO_SUGAR
-            used_model_name = "Scenario B (상세/수치형, 혈당 미포함)"
-            clip_bounds = CLIP_BOUNDS_DETAIL_NO_SUGAR
-            threshold = get_scenario_threshold("B")
+def predict_with_model(payload: PredictRequest) -> PredictResponse:
+    raw_input: dict[str, float | None] = {
+        "age": payload.age,
+        "hypertension": payload.hypertension,
+        "heart_disease": payload.heart_disease,
+        "avg_glucose_level": payload.avg_glucose_level,
+        "bmi": payload.bmi,
+        "smoking_status": payload.smoking_status,
+    }
 
-        active_count = sum(1 for k in feature_names if k in user_provided)
-        if active_count == 0:
-            raise HTTPException(
-                status_code=400,
-                detail=f"현재 모델에서 사용하는 항목이 입력되지 않았습니다. 필요 항목: {', '.join(feature_names)}",
-            )
+    user_provided = {k: float(v) for k, v in raw_input.items() if v is not None}
 
-        # 신규 상세 모델 전처리(Scaler + Imputer)가 존재하면 우선 사용
-        if isinstance(scaler, StandardScaler) and isinstance(imputer, KNNImputer):
-            raw_row = []
-            for f in feature_names:
-                v = user_provided.get(f)
-                if v is None or float(v) == 0.0:
-                    raw_row.append(np.nan)
-                else:
-                    raw_row.append(float(v))
-            cols_kor = [FEATURE_LABELS[f] for f in feature_names]
-            x_raw = pd.DataFrame([raw_row], columns=cols_kor)
-            if isinstance(clip_bounds, dict):
-                for c in cols_kor:
-                    if c in clip_bounds:
-                        low, up = clip_bounds[c]
-                        x_raw[c] = x_raw[c].clip(low, up)
-            x_scaled = scaler.transform(x_raw)
-            X = imputer.transform(x_scaled)
-        else:
-            # legacy fallback
-            x_values = [standardize(f, user_provided.get(f, 0.0)) for f in feature_names]
-            X = np.array([x_values], dtype=float)
-            threshold = 0.5
+    if not user_provided:
+        raise HTTPException(status_code=400, detail="최소 1개 이상의 입력 항목이 필요합니다.")
 
-    # 예측
-    proba = model.predict_proba(X)[0]
+    has_glucose = "avg_glucose_level" in user_provided
+    feature_names = FEATURES_WITH_GLUCOSE if has_glucose else FEATURES_NO_GLUCOSE
+
+    missing = [f for f in feature_names if f not in user_provided]
+    if missing:
+        labels = ", ".join(FEATURE_LABELS.get(m, m) for m in missing)
+        raise HTTPException(status_code=400, detail=f"필수 입력값이 누락되었습니다: {labels}")
+
+    _validate_ranges(user_provided)
+
+    # 모델 교체 지점 6:
+    # model_loader에서 불러온 모델 객체를 여기서 실제 추론에 사용합니다.
+    # 모델 파일 교체 + 서버 재시작 시 자동으로 새 모델이 반영됩니다.
+    model = MODEL_WITH_GLUCOSE if has_glucose else MODEL_NO_GLUCOSE
+    used_model_name = "Stroke Model A (혈당 포함)" if has_glucose else "Stroke Model B (혈당 미포함)"
+
+    x_values = [user_provided[f] for f in feature_names]
+    x = np.array([x_values], dtype=float)
+
+    proba = model.predict_proba(x)[0]
     probability = float(proba[1])
+    threshold = get_model_threshold(with_glucose=has_glucose)
     prediction = int(probability >= threshold)
-    label = "당뇨 위험" if prediction == 1 else "정상 범위"
+    label = _risk_label(probability)
 
-    # 차트 생성
     chart_image_base64: str | None = None
     try:
-        chart_image_base64 = create_chart_base64(
-            probability, user_provided, model, feature_names,
+        chart_image_base64 = _create_chart_base64(
+            probability,
+            user_provided,
+            model,
+            feature_names,
         )
     except Exception:
         chart_image_base64 = None
